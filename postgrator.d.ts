@@ -17,7 +17,7 @@ declare namespace Postgrator {
     filename: string
     name: string
     md5: string
-    getSql: () => string
+    getSql: () => Promise<string>
   }
 
   export interface BaseOptions {

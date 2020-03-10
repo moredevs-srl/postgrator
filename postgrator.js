@@ -47,51 +47,65 @@ class Postgrator extends EventEmitter {
       }
     })
       .then(migrationFiles => {
-        return migrationFiles
-          .filter(file => ['.sql', '.js'].indexOf(path.extname(file)) >= 0)
-          .map(file => {
-            const basename = path.basename(file)
-            const ext = path.extname(basename)
+        return Promise.all(
+          migrationFiles
+            .filter(file => ['.sql', '.js'].indexOf(path.extname(file)) >= 0)
+            .map(file => {
+              const basename = path.basename(file)
+              const ext = path.extname(basename)
 
-            const basenameNoExt = path.basename(file, ext)
-            let [version, action, name = ''] = basenameNoExt.split('.')
-            version = Number(version)
+              const basenameNoExt = path.basename(file, ext)
+              let [version, action, name = ''] = basenameNoExt.split('.')
+              version = Number(version)
 
-            const filename = migrationPattern
-              ? file
-              : path.join(migrationDirectory, file)
+              const filename = migrationPattern
+                ? file
+                : path.join(migrationDirectory, file)
 
-            // TODO normalize filename on returned migration object
-            // Today it is full path if glob is used, otherwise basename with extension
-            // This is not persisted in the database, but this field might be a part of someone's workflow
-            // Making this change will be a breaking fix
+              // TODO normalize filename on returned migration object
+              // Today it is full path if glob is used, otherwise basename with extension
+              // This is not persisted in the database, but this field might be a part of someone's workflow
+              // Making this change will be a breaking fix
 
-            if (ext === '.sql') {
-              return {
-                version,
-                action,
-                filename: file,
-                name,
-                md5: fileChecksum(filename, newline),
-                getSql: () => fs.readFileSync(filename, 'utf8')
+              if (ext === '.sql') {
+                return fs.readFile(filename, 'utf8').then(sql => {
+                  return {
+                    version,
+                    action,
+                    filename: file,
+                    name,
+                    sql
+                  }
+                })
               }
-            }
 
-            if (ext === '.js') {
-              const jsModule = require(filename)
-              const sql = jsModule.generateSql()
-
-              return {
-                version,
-                action,
-                filename: file,
-                name,
-                md5: checksum(sql, newline),
-                getSql: () => sql
+              if (ext === '.js') {
+                const jsModule = require(filename)
+                return Promise.resolve(jsModule.generateSql()).then(sql => {
+                  return {
+                    version,
+                    action,
+                    filename: file,
+                    name,
+                    sql
+                  }
+                })
               }
-            }
-          })
+            })
+        )
       })
+      .then(migrations =>
+        migrations.map(migration => {
+          return {
+            version: migration.version,
+            action: migration.action,
+            filename: migration.filename,
+            name: migration.name,
+            md5: checksum(migration.sql, newline),
+            getSql: () => migration.sql
+          }
+        })
+      )
       .then(migrations =>
         migrations.filter(migration => !isNaN(migration.version))
       )
